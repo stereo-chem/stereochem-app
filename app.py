@@ -1,8 +1,7 @@
 import streamlit as st
 import pubchempy as pcp
 from rdkit import Chem
-from rdkit.Chem import AllChem, Draw
-# استيراد الأدوات بشكل منفصل لتجنب خطأ AttributeError
+from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers, StereoEnumerationOptions
 
 # 1. إعدادات الصفحة
@@ -27,7 +26,7 @@ if st.button("Analyze Isomers"):
         st.warning("Please enter a compound name first.")
     else:
         try:
-            # البحث بالاسم كما كنتِ تفعلين
+            # البحث بالاسم (الطريقة اللي اشتغلت معاكي)
             results = pcp.get_compounds(compound_name, 'name')
             
             if not results:
@@ -36,50 +35,49 @@ if st.button("Analyze Isomers"):
                 base_smiles = results[0].smiles
                 mol = Chem.MolFromSmiles(base_smiles)
                 
-                # --- جزئية الألين والـ 3D مدمجة بشكل آمن ---
+                # --- جزئية الألين (مبسطة جداً لضمان الظهور) ---
                 mol = Chem.AddHs(mol)
-                AllChem.EmbedMolecule(mol, randomSeed=42)
+                # لو الـ 3D فشل، البرنامج هيكمل عادي ومش هيقف
+                AllChem.EmbedMolecule(mol, useRandomCoords=True, randomSeed=42)
                 
-                # إظهار كل الأيزومرات الممكنة
-                opts = StereoEnumerationOptions(tryEmbedding=False)
+                opts = StereoEnumerationOptions(tryEmbedding=False) 
                 isomers = list(EnumerateStereoisomers(mol, options=opts))
                 # ------------------------------------------
 
-                if len(isomers) <= 1:
-                    st.info(f"✨ The compound {compound_name} is Achiral or has no stereoisomers.")
+                if len(isomers) == 0:
+                    st.warning("No isomers could be generated for this structure.")
+                else:
+                    labels = []
+                    for i, iso in enumerate(isomers):
+                        Chem.AssignStereochemistry(iso, force=True, cleanIt=True)
+                        stereo_info = []
+                        
+                        # كشف E/Z و R/S
+                        for bond in iso.GetBonds():
+                            stereo = bond.GetStereo()
+                            if stereo == Chem.BondStereo.STEREOE: stereo_info.append("E")
+                            elif stereo == Chem.BondStereo.STEREOZ: stereo_info.append("Z")
+                        
+                        chiral_centers = Chem.FindMolChiralCenters(iso)
+                        for center in chiral_centers:
+                            stereo_info.append(f"({center[1]})")
+                        
+                        label = f"Isomer {i+1}: " + (", ".join(stereo_info) if stereo_info else "Structure")
+                        labels.append(label)
 
-                labels = []
-                for i, iso in enumerate(isomers):
-                    Chem.AssignStereochemistry(iso, force=True, cleanIt=True)
-                    stereo_info = []
+                    st.success(f"Analyzed: {compound_name} | Forms: **{len(isomers)}**")
                     
-                    # كشف الأنواع المختلفة (E/Z و R/S) كما في الكود الأصلي
-                    for bond in iso.GetBonds():
-                        stereo = bond.GetStereo()
-                        if stereo == Chem.BondStereo.STEREOE: stereo_info.append("E")
-                        elif stereo == Chem.BondStereo.STEREOZ: stereo_info.append("Z")
-                    
-                    chiral_centers = Chem.FindMolChiralCenters(iso)
-                    for center in chiral_centers:
-                        stereo_info.append(f"({center[1]})")
-                    
-                    label = f"Isomer {i+1}: " + (", ".join(stereo_info) if stereo_info else "Structure")
-                    labels.append(label)
-
-                st.success(f"Analyzed Structure: {compound_name} | Total Forms: **{len(isomers)}**")
-                
-                img = Draw.MolsToGridImage(
-                    isomers,
-                    molsPerRow=3,
-                    subImgSize=(350, 350),
-                    legends=labels
-                )
-                
-                st.image(img, use_container_width=True)
+                    # رسم الصور
+                    img = Draw.MolsToGridImage(
+                        isomers,
+                        molsPerRow=3,
+                        subImgSize=(350, 350),
+                        legends=labels
+                    )
+                    st.image(img, use_container_width=True)
 
         except Exception as e:
-            # عرض الخطأ بشكل أوضح إذا حدث
-            st.error(f"An unexpected error occurred: {e}")
+            st.error(f"Error: {e}")
 
 st.markdown("---")
 st.caption("Powered by RDKit, PubChemPy, and Streamlit.")
