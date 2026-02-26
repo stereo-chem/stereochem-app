@@ -1,5 +1,6 @@
 import streamlit as st
 import pubchempy as pcp
+from rdkit.Chem import AllChem
 from rdkit import Chem
 from rdkit.Chem import Draw
 from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers
@@ -34,16 +35,17 @@ if st.button("Analyze Isomers"):
                 base_smiles = results[0].smiles
                 mol = Chem.MolFromSmiles(base_smiles)
                 
-                mol_no_stereo = Chem.Mol(mol)
-                for bond in mol_no_stereo.GetBonds():
-                    bond.SetStereo(Chem.BondStereo.STEREONONE)
+                # --- تفعيل خاصية الـ 3D ومعالجة الألين ---
+                mol = Chem.AddHs(mol) # إضافة الهيدروجين للرؤية الفراغية
+                AllChem.EmbedMolecule(mol) # حساب الزوايا الثلاثية الأبعاد
                 
-                isomers = list(EnumerateStereoisomers(mol_no_stereo))
-                
-                # --- التعديل هنا: التحقق من الـ Achiral ---
+                # جعل tryEmbedding=False يضمن إظهار "كل" الأيزومرات دون حذف المستحيل منها
+                opts = EnumerateStereoisomers.StereoEnumerationOptions(tryEmbedding=False)
+                isomers = list(EnumerateStereoisomers(mol, options=opts))
+                # ---------------------------------------
+
                 if len(isomers) <= 1:
                     st.info(f"✨ The compound {compound_name} is Achiral. It does not have geometric (E/Z) or optical (R/S) isomers.")
-                # ------------------------------------------
 
                 labels = []
                 for i, iso in enumerate(isomers):
@@ -52,16 +54,13 @@ if st.button("Analyze Isomers"):
                     
                     for bond in iso.GetBonds():
                         stereo = bond.GetStereo()
-                        if stereo == Chem.BondStereo.STEREOE: 
-                            stereo_info.append("E")
-                        elif stereo == Chem.BondStereo.STEREOZ: 
-                            stereo_info.append("Z")
+                        if stereo == Chem.BondStereo.STEREOE: stereo_info.append("E")
+                        elif stereo == Chem.BondStereo.STEREOZ: stereo_info.append("Z")
                     
                     chiral_centers = Chem.FindMolChiralCenters(iso)
                     for center in chiral_centers:
                         stereo_info.append(f"({center[1]})")
                     
-                    # لو مفيش معلومات فراغية بنكتب Achiral تحت الصورة
                     label = f"Isomer {i+1}: " + (", ".join(stereo_info) if stereo_info else "Achiral Structure")
                     labels.append(label)
 
