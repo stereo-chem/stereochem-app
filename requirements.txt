@@ -1,6 +1,6 @@
 streamlit
 pubchempy
-rdkit-pypi
+rdkit
 stmol
 py3Dmol
 
