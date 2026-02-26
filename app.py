@@ -22,8 +22,8 @@ st.markdown("""
 compound_name = st.text_input("Enter Structure Name (e.g., 1,2-dichloroethene or Thalidomide):", "")
 
 if st.button("Analyze Isomers"):
-	if not compound_name:
-    	st.warning("Please enter a compound name first.")
+	if not compound_name:        
+		st.warning("Please enter a compound name first.")
 	else:
     	try:
         	results = pcp.get_compounds(compound_name, 'name')
