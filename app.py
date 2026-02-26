@@ -5,78 +5,73 @@ from rdkit.Chem import AllChem, EnumerateStereoisomers
 from stmol import showmol
 import py3Dmol
 
-st.set_page_config(page_title="Chemical Isomer Explorer", layout="wide")
-st.title("🧪 Comprehensive Isomer Analysis")
-st.markdown("Analysis of **R/S**, **E/Z**, and **Axial Chirality** (Allenes)")
+st.set_page_config(page_title="Allene & Isomer Pro", layout="wide")
+st.title("🧪 Full Isomer Analysis (Allenes & More)")
 
-name = st.text_input("Enter Molecule Name (e.g., 2,3-pentadiene or 2-butene):", "2,3-pentadiene")
+name = st.text_input("Enter Molecule Name (e.g., 2,3-pentadiene):", "2,3-pentadiene")
 
-if st.button("Generate & Analyze All Isomers"):
+if st.button("Generate All Stereoisomers"):
     try:
-        # 1. جلب البيانات من PubChem
+        # 1. جلب البيانات وتحويلها لجزيء
         results = pcp.get_compounds(name, 'name')
         if not results:
             st.error("Molecule not found!")
         else:
             smiles = results[0].isomeric_smiles
-            # تحويل SMILES إلى جزيء مع إضافة الهيدروجينات للتحليل الهندسي
             base_mol = Chem.MolFromSmiles(smiles)
-            base_mol = Chem.AddHs(base_mol)
             
-            # 2. إعدادات التوليد الشامل (تشمل الروابط المزدوجة والمراكز الكيرالية)
-            opts = EnumerateStereoisomers.StereoEnumerationOptions(
-                tryEmbedding=True, 
-                onlyUnassigned=False  # توليد كل الاحتمالات حتى لو كانت محددة
-            )
+            # إضافة الهيدروجينات ضروري جداً للألينات والـ Cis/Trans
+            base_mol = Chem.AddHs(base_mol) 
+            
+            # 2. توليد كل الأيزومرات الممكنة (R/S, E/Z, Axial Chirality)
+            opts = EnumerateStereoisomers.StereoEnumerationOptions(tryEmbedding=True, onlyUnassigned=False)
             isomers = list(EnumerateStereoisomers.EnumerateStereoisomers(base_mol, options=opts))
             
-            st.success(f"Found {len(isomers)} possible stereoisomers (including E/Z and R/S)")
-
+            st.success(f"Found {len(isomers)} Stereoisomers!")
+            
+            # 3. عرض كل أيزومر وتحليله
             for i, iso in enumerate(isomers):
-                # حساب الإحداثيات الثلاثية لكل أيزومر بشكل منفصل
-                iso = Chem.AddHs(iso)
-                AllChem.EmbedMolecule(iso, AllChem.ETKDG())
-                AllChem.MMFFOptimizeMolecule(iso) # تحسين الشكل الطاقي للمجسم
-                
                 st.subheader(f"Isomer #{i+1}")
+                
+                # حساب الإحداثيات الـ 3D مع تحسين الهيكل (Optimization)
+                AllChem.EmbedMolecule(iso, AllChem.ETKDG())
+                AllChem.MMFFOptimizeMolecule(iso)
                 
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    st.write("#### 📋 Stereochemical Labels:")
-                    # تحديد الكيمياء الفراغية (R/S و E/Z)
+                    st.write("### 🧬 Stereo Properties:")
+                    # تحديث وتحديد الكيمياء الفراغية
                     Chem.AssignStereochemistry(iso, force=True, cleanIt=True)
                     
-                    # استخراج الـ R/S (Chiral Centers)
-                    chiral_centers = Chem.FindMolChiralCenters(iso, includeUnassigned=True)
-                    if chiral_centers:
-                        for atom_idx, label in chiral_centers:
-                            st.info(f"**Center (R/S):** Atom {iso.GetAtomWithIdx(atom_idx).GetSymbol()}{atom_idx} is **{label}**")
+                    # أ- استخراج المراكز الكيرالية (R/S)
+                    centers = Chem.FindMolChiralCenters(iso, includeUnassigned=True)
+                    if centers:
+                        for idx, label in centers:
+                            st.info(f"**Chiral Center:** {iso.GetAtomWithIdx(idx).GetSymbol()}{idx} is **{label}**")
                     
-                    # استخراج الـ E/Z (Double Bonds)
-                    found_ez = False
+                    # ب- استخراج الروابط المزدوجة (E/Z أو Cis/Trans)
+                    has_ez = False
                     for bond in iso.GetBonds():
                         if bond.GetBondType() == Chem.rdchem.BondType.DOUBLE:
                             stereo = bond.GetStereo()
                             if stereo in [Chem.rdchem.BondStereo.STEREOE, Chem.rdchem.BondStereo.STEREOZ]:
-                                found_ez = True
-                                label = "E (Trans-like)" if stereo == Chem.rdchem.BondStereo.STEREOE else "Z (Cis-like)"
-                                st.warning(f"**Bond (E/Z):** Bond between {bond.GetBeginAtomIdx()}-{bond.GetEndAtomIdx()} is **{label}**")
+                                label = "E (Trans)" if stereo == Chem.rdchem.BondStereo.STEREOE else "Z (Cis)"
+                                st.warning(f"**Double Bond:** {bond.GetBeginAtomIdx()}-{bond.GetEndAtomIdx()} is **{label}**")
+                                has_ez = True
                     
-                    if not chiral_centers and not found_ez:
-                        st.write("No specific R/S or E/Z labels detected for this structure.")
+                    if not centers and not has_ez:
+                        st.write("No specific stereo-labels detected (Common in symmetric allenes).")
 
                 with col2:
-                    # العرض الثلاثي الأبعاد
+                    # عرض الـ 3D (Balls and Sticks)
                     view = py3Dmol.view(width=600, height=400)
                     mol_block = Chem.MolToMolBlock(iso)
                     view.addModel(mol_block, 'mol')
                     view.setStyle({'stick': {'radius': 0.15}, 'sphere': {'scale': 0.25}})
-                    view.setBackgroundColor('#f0f2f6')
                     view.zoomTo()
                     showmol(view, height=400, width=600)
-                
                 st.divider()
 
     except Exception as e:
-        st.error(f"Error during analysis: {e}")
+        st.error(f"Error analyzing: {e}")
