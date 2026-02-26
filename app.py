@@ -1,9 +1,9 @@
 import streamlit as st
 import pubchempy as pcp
-from rdkit.Chem import AllChem
 from rdkit import Chem
-from rdkit.Chem import Draw
-from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers
+from rdkit.Chem import AllChem, Draw
+# استيراد الأدوات بشكل منفصل لتجنب خطأ AttributeError
+from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers, StereoEnumerationOptions
 
 # 1. إعدادات الصفحة
 st.set_page_config(page_title="Chemical Isomer Analysis", layout="wide")
@@ -20,13 +20,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. مدخلات المستخدم
-compound_name = st.text_input("Enter Structure Name (e.g., 1,2-dichloroethene or Thalidomide):", "")
+compound_name = st.text_input("Enter Structure Name (e.g., 2-butene or Thalidomide):", "")
 
 if st.button("Analyze Isomers"):
     if not compound_name:
         st.warning("Please enter a compound name first.")
     else:
         try:
+            # البحث بالاسم كما كنتِ تفعلين
             results = pcp.get_compounds(compound_name, 'name')
             
             if not results:
@@ -35,23 +36,24 @@ if st.button("Analyze Isomers"):
                 base_smiles = results[0].smiles
                 mol = Chem.MolFromSmiles(base_smiles)
                 
-                # --- تفعيل خاصية الـ 3D ومعالجة الألين ---
-                mol = Chem.AddHs(mol) # إضافة الهيدروجين للرؤية الفراغية
-                AllChem.EmbedMolecule(mol) # حساب الزوايا الثلاثية الأبعاد
+                # --- جزئية الألين والـ 3D مدمجة بشكل آمن ---
+                mol = Chem.AddHs(mol)
+                AllChem.EmbedMolecule(mol, randomSeed=42)
                 
-                # جعل tryEmbedding=False يضمن إظهار "كل" الأيزومرات دون حذف المستحيل منها
-                opts = EnumerateStereoisomers.StereoEnumerationOptions(tryEmbedding=False)
+                # إظهار كل الأيزومرات الممكنة
+                opts = StereoEnumerationOptions(tryEmbedding=False)
                 isomers = list(EnumerateStereoisomers(mol, options=opts))
-                # ---------------------------------------
+                # ------------------------------------------
 
                 if len(isomers) <= 1:
-                    st.info(f"✨ The compound {compound_name} is Achiral. It does not have geometric (E/Z) or optical (R/S) isomers.")
+                    st.info(f"✨ The compound {compound_name} is Achiral or has no stereoisomers.")
 
                 labels = []
                 for i, iso in enumerate(isomers):
                     Chem.AssignStereochemistry(iso, force=True, cleanIt=True)
                     stereo_info = []
                     
+                    # كشف الأنواع المختلفة (E/Z و R/S) كما في الكود الأصلي
                     for bond in iso.GetBonds():
                         stereo = bond.GetStereo()
                         if stereo == Chem.BondStereo.STEREOE: stereo_info.append("E")
@@ -61,7 +63,7 @@ if st.button("Analyze Isomers"):
                     for center in chiral_centers:
                         stereo_info.append(f"({center[1]})")
                     
-                    label = f"Isomer {i+1}: " + (", ".join(stereo_info) if stereo_info else "Achiral Structure")
+                    label = f"Isomer {i+1}: " + (", ".join(stereo_info) if stereo_info else "Structure")
                     labels.append(label)
 
                 st.success(f"Analyzed Structure: {compound_name} | Total Forms: **{len(isomers)}**")
@@ -76,6 +78,7 @@ if st.button("Analyze Isomers"):
                 st.image(img, use_container_width=True)
 
         except Exception as e:
+            # عرض الخطأ بشكل أوضح إذا حدث
             st.error(f"An unexpected error occurred: {e}")
 
 st.markdown("---")
