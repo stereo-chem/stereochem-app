@@ -2,23 +2,24 @@ import streamlit as st
 import pubchempy as pcp
 import requests
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.EnumerateStereoisomers import EnumerateStereoisomers, StereoEnumerationOptions
 from rdkit.Chem.Draw import rdMolDraw2D
 from stmol import showmol
 import py3Dmol
+import numpy as np
 
 # --- 1. إعدادات الصفحة والستايل ---
 st.set_page_config(page_title="Professional Isomer System", layout="wide")
 
 st.markdown("""
 <div style="background-color: #fdf2f2; padding: 15px; border-radius: 10px; border-left: 5px solid #800000; margin-bottom: 20px;">
-    <strong style="color: #800000; font-size: 1.2em;">Stereoisomerism Reference Guide:</strong>
-    <ul style="color: black; margin-top: 10px;">
+    <strong style="color: #800000; font-size: 1.2em;">Stereoisomerism Reference Guide:</strong><br>
+    <ul style="list-style-type: none; padding-left: 0; margin-top: 10px; color: black;">
         <li>1. <b>Cis / Trans:</b> Identical groups on same/opposite sides.</li>
-        <li>2. <b>E / Z:</b> High-priority groups together (Z) or opposite (E).</li>
-        <li>3. <b>R / S:</b> Absolute configuration of chiral centers.</li>
-        <li>4. <b>Ra / Sa:</b> Stereochemistry of Allenes (C=C=C).</li>
+        <li>2. <b>E / Z (Absolute - CIP System):</b> High-priority groups together (Z) or opposite (E).</li>
+        <li>3. <b>R / S (Optical):</b> Absolute configuration of chiral centers.</li>
+        <li>4. <b>Ra / Sa (Axial):</b> Stereochemistry of Allenes (C=C=C).</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
@@ -28,8 +29,8 @@ st.markdown("<h2 style='color: #800000; font-family: serif; border-bottom: 2px s
 # --- 2. الدوال المساعدة ---
 def get_smiles_smart(name):
     try:
-        url = f"https://opsin.ch.cam.ac.uk/opsin/{name}.json"
-        res = requests.get(url)
+        opsin_url = f"https://opsin.ch.cam.ac.uk/opsin/{name}.json"
+        res = requests.get(opsin_url)
         if res.status_code == 200: return res.json()['smiles']
     except: pass
     try:
@@ -38,98 +39,105 @@ def get_smiles_smart(name):
     except: pass
     return None
 
+def calculate_axial_name(mol):
+    try:
+        mol_3d = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol_3d, AllChem.ETKDG())
+        conf = mol_3d.GetConformer()
+        pattern = Chem.MolFromSmarts("C=C=C")
+        match = mol_3d.GetSubstructMatch(pattern)
+        if not match: return "N/A"
+        angle = AllChem.GetDihedralDeg(conf, match[0]-1, match[0], match[2], match[2]+1)
+        return "Ra" if angle > 0 else "Sa"
+    except: return "Ra/Sa"
+
+# --- دالة 2D (تم تعديلها لتظهر الـ Solid and Dashed بشكل أكاديمي) ---
 def render_pro_2d(mol):
-    mc = Chem.Mol(mol)
-    # تأكيد حساب الكيمياء الفراغية
+    # إضافة الهيدروجينات للرسم لإبراز التجسيم كما في الكتب
+    mc = Chem.AddHs(mol) 
     Chem.AssignStereochemistry(mc, force=True, cleanIt=True)
     AllChem.Compute2DCoords(mc)
-    # توليد روابط Wedge/Dash لإظهار التجسيم (Solid/Dashed)
+    
+    # إجبار توليد الروابط الفراغية (Solid/Dashed)
     Chem.WedgeMolBonds(mc, mc.GetConformer())
     
-    allene_p = Chem.MolFromSmarts("C=C=C")
-    matches = mc.GetSubstructMatches(allene_p)
-    
-    atoms_to_h = []
-    bonds_to_h = []
-    a_colors = {}
-    b_colors = {}
-    h_color = (1.0, 0.85, 0.85) 
-
-    for match in matches:
-        atoms_to_h.extend(match)
-        for idx in match: a_colors[idx] = h_color
-        for i in range(len(match)-1):
-            bond = mc.GetBondBetweenAtoms(match[i], match[i+1])
-            if bond:
-                bidx = bond.GetIdx()
-                bonds_to_h.append(bidx)
-                b_colors[bidx] = h_color
-
-    # رسم الجزيء بصيغة عالية الجودة
-    drawer = rdMolDraw2D.MolDraw2DCairo(600, 600)
+    drawer = rdMolDraw2D.MolDraw2DCairo(500, 500)
     opts = drawer.drawOptions()
-    opts.bondLineWidth = 5.0           # سمك الخط لإبراز الـ Dashed
-    opts.addStereoAnnotation = True    # إظهار رموز التجسيم
-    opts.fixedBondLength = 45          
-    
-    drawer.DrawMolecule(mc, highlightAtoms=atoms_to_h, highlightAtomColors=a_colors,
-                       highlightBonds=bonds_to_h, highlightBondColors=b_colors)
+    opts.bondLineWidth = 4.5           # زيادة السمك للوضوح
+    opts.addStereoAnnotation = True
+    opts.useMolBlockWedging = False
+    opts.fixedBondLength = 40          # زيادة الطول لمنع تداخل الذرات
+    opts.explicitMethyl = True
+    opts.clearBackground = True
+
+    # إظهار حرف C بوضوح في ذرات الكربون
+    for atom in mc.GetAtoms():
+        if atom.GetSymbol() == 'C':
+            atom.SetProp("atomLabel", "C")
+
+    drawer.DrawMolecule(mc)
     drawer.FinishDrawing()
     return drawer.GetDrawingText()
 
 # --- 3. المعالجة الرئيسية ---
-raw_name = st.text_input("Enter Structure Name (e.g., 2,3-pentadiene):", "1,3-Dimethyl-3-phenylallene")
+compound_name = st.text_input("Enter Structure Name:", "2,3-pentadiene")
 
 if st.button("Analyze & Visualize Isomers"):
-    smiles = get_smiles_smart(raw_name)
+    smiles = get_smiles_smart(compound_name)
     if smiles:
-        base_mol = Chem.MolFromSmiles(smiles)
-        if base_mol:
-            Chem.RemoveStereochemistry(base_mol)
-            
-            allene_p = Chem.MolFromSmarts("C=C=C")
-            if base_mol.HasSubstructMatch(allene_p):
-                for match in base_mol.GetSubstructMatches(allene_p):
-                    base_mol.GetAtomWithIdx(match[0]).SetChiralTag(Chem.ChiralType.CHI_TETRAHEDRAL_CW)
+        mol = Chem.MolFromSmiles(smiles)
+        allene_p = Chem.MolFromSmarts("C=C=C")
+        
+        if mol.HasSubstructMatch(allene_p):
+            for match in mol.GetSubstructMatches(allene_p):
+                mol.GetAtomWithIdx(match[0]).SetChiralTag(Chem.ChiralType.CHI_TETRAHEDRAL_CW)
 
-            opts = StereoEnumerationOptions(tryEmbedding=True, onlyUnassigned=False)
-            isomers = list(EnumerateStereoisomers(base_mol, options=opts))
-            
-            # ضمان توليد كلا الآيزومرين للألين
-            if len(isomers) == 1 and base_mol.HasSubstructMatch(allene_p):
-                iso2 = Chem.Mol(isomers[0])
-                for a in iso2.GetAtoms():
-                    if a.GetChiralTag() == Chem.ChiralType.CHI_TETRAHEDRAL_CW:
-                        a.SetChiralTag(Chem.ChiralType.CHI_TETRAHEDRAL_CCW)
-                isomers.append(iso2)
+        opts = StereoEnumerationOptions(tryEmbedding=True, onlyUnassigned=False)
+        isomers = list(EnumerateStereoisomers(mol, options=opts))
+        
+        if len(isomers) == 1 and mol.HasSubstructMatch(allene_p):
+            iso2 = Chem.Mol(isomers[0])
+            for a in iso2.GetAtoms():
+                if a.GetChiralTag() == Chem.ChiralType.CHI_TETRAHEDRAL_CW:
+                    a.SetChiralTag(Chem.ChiralType.CHI_TETRAHEDRAL_CCW)
+            isomers.append(iso2)
 
-            st.subheader(f"Analysis for: {raw_name}")
-            st.info(f"Detected **{len(isomers)}** possible stereoisomers.")
-            
-            cols = st.columns(len(isomers))
-            for i, iso in enumerate(isomers):
-                with cols[i]:
-                    label = "Ra" if i == 0 else "Sa"
-                    st.markdown(f"### Isomer {i+1}: <span style='color: #800000;'>{label}</span>", unsafe_allow_html=True)
-                    
-                    # عرض الرسم 2D المصلح
-                    try:
-                        st.image(render_pro_2d(iso), use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error rendering 2D: {e}")
-                    
-                    # عرض 3D
-                    try:
-                        m3d = Chem.AddHs(iso)
-                        AllChem.EmbedMolecule(m3d, AllChem.ETKDG())
-                        view = py3Dmol.view(width=400, height=300)
-                        view.addModel(Chem.MolToMolBlock(m3d), 'mol')
-                        view.setStyle({'stick': {}, 'sphere': {'scale':0.25}})
-                        view.zoomTo()
-                        showmol(view)
-                    except:
-                        st.warning("3D visualization failed for this isomer.")
+        st.subheader(f"Found {len(isomers)} Stereoisomer(s)")
+        st.subheader("1. Isomeric Relationships")
+        if len(isomers) > 1:
+            st.info("💡 Relationships Analysis: Stereoisomeric relationship detected (Enantiomers/Axial).")
         else:
-            st.error("Invalid molecule structure from SMILES.")
+            st.info("The compound is achiral or only one isomer was identified.")
+        
+        st.write("---")
+        cols = st.columns(len(isomers))
+        for i, iso in enumerate(isomers):
+            with cols[i]:
+                axial_type = "Ra" if i == 0 else "Sa"
+                st.markdown(f"### Isomer {i+1}: <span style='color: #800000;'>{axial_type}</span>", unsafe_allow_html=True)
+                
+                # عرض الـ 2D المطور
+                st.image(render_pro_2d(iso), use_container_width=True)
+                
+                # عرض الـ 3D التفاعلي
+                m3d = Chem.AddHs(iso)
+                AllChem.EmbedMolecule(m3d, AllChem.ETKDG())
+                
+                view = py3Dmol.view(width=400, height=300)
+                view.addModel(Chem.MolToMolBlock(m3d), 'mol')
+                
+                # إيجاد ذرات الألين للتلوين
+                allene_matches = iso.GetSubstructMatches(allene_p)
+                allene_atoms = set()
+                for match in allene_matches:
+                    allene_atoms.update(match)
+                
+                # تلوين ذرات الألين باللون الأحمر في الـ 3D
+                for idx in allene_atoms:
+                    view.setStyle({'serial': idx+1}, {'stick': {'color':'red'}, 'sphere': {'color':'red','scale':0.3}})
+                
+                view.setStyle({'stick': {}, 'sphere': {'scale':0.25}})
+                view.zoomTo()
+                showmol(view)
     else:
-        st.error("Compound not found. Please try a standard IUPAC name.")
+        st.error("Compound not found.")
